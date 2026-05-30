@@ -1,2 +1,2 @@
 # rookie
-now just for improve my skills
+just for improve my skills
