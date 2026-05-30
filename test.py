@@ -1,8 +1,8 @@
 user=input("entrer votre prenom:")
-a=10
-b=5
+a=int(input("entrer un chiffre quelconque:"))
+b=int(input("entrer encore un chiffre de votre choix:"))
 if (a+b)==15:
-	print("hello" ,user)
+	print("hello" ,user,"vous avez été super")
 else:
-	print("your statement is incorrect")
+	print("hello",user,"malheureusement c'est pas le bon resulat")
 
