@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 from tkinter import*
 def viseure():
     can.create_oval(250,400,800,15)

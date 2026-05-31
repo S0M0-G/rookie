@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 user=input("entrer votre prenom:")
 a=int(input("entrer un chiffre quelconque:"))
 b=int(input("entrer encore un chiffre de votre choix:"))

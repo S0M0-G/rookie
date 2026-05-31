@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 print('bonjour','python')
 nom=input('quel est ton nom?')
 age=input('quel est ton age?')
