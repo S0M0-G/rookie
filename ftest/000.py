@@ -6,7 +6,7 @@ print ('hello master what are us doing today?')
 #def de la liste contenant les options à choisir 
 goal = ['coding','studing','learning','building app','gaming']
 #demande à l'utilisateur de faire un choix parmis ceux present'
-answer = input ('choise one option between (coding,studing,learning,building app,gaming):')
+answer = input ('choise one option between (coding,studing,learning,building app,gaming):').lower()
 #mise en place de la reponse selon le choix de l'utilisateur'
 if answer in goal:
 	print ('ok master we will going to do',answer)
