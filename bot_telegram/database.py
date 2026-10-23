@@ -221,6 +221,35 @@ def create_tables():
         )
     """)
 
+    # ---------------------------------
+    # DOMAINES AUTORISES PAR GROUPE
+    # ---------------------------------
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS allowed_domains (
+            chat_id INTEGER NOT NULL,
+            domain TEXT NOT NULL,
+            PRIMARY KEY (chat_id, domain)
+        )
+    """)
+
+    # ---------------------------------
+    # HISTORIQUE TEMPORAIRE DES LIENS
+    # ---------------------------------
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS link_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            normalized_link TEXT NOT NULL,
+            sent_at INTEGER NOT NULL
+        )
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_link_attempts_lookup
+        ON link_attempts (chat_id, user_id, normalized_link, sent_at)
+    """)
+
     connection.commit()
     connection.close()
 
@@ -647,6 +676,85 @@ def count_users(chat_id):
     connection.close()
 
     return count
+
+
+
+
+# =================================
+# AUTOMODERATION DES LIENS
+# =================================
+
+def add_allowed_domain(chat_id, domain):
+    connection = connect()
+    cursor = connection.cursor()
+    cursor.execute(
+        "INSERT OR IGNORE INTO allowed_domains (chat_id, domain) VALUES (?, ?)",
+        (chat_id, domain)
+    )
+    added = cursor.rowcount > 0
+    connection.commit()
+    connection.close()
+    return added
+
+
+def remove_allowed_domain(chat_id, domain):
+    connection = connect()
+    cursor = connection.cursor()
+    cursor.execute(
+        "DELETE FROM allowed_domains WHERE chat_id = ? AND domain = ?",
+        (chat_id, domain)
+    )
+    removed = cursor.rowcount > 0
+    connection.commit()
+    connection.close()
+    return removed
+
+
+def get_allowed_domains(chat_id):
+    connection = connect()
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT domain FROM allowed_domains WHERE chat_id = ? ORDER BY domain COLLATE NOCASE",
+        (chat_id,)
+    )
+    domains = [row[0] for row in cursor.fetchall()]
+    connection.close()
+    return domains
+
+
+def record_link_send(chat_id, user_id, normalized_link, sent_at, window_seconds=1800):
+    """Enregistre un lien et renvoie son nombre d'envois dans la fenêtre de 30 minutes."""
+    connection = connect()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        "DELETE FROM link_attempts WHERE sent_at < ?",
+        (sent_at - window_seconds,)
+    )
+
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM link_attempts
+        WHERE chat_id = ?
+          AND user_id = ?
+          AND normalized_link = ?
+          AND sent_at >= ?
+    """, (
+        chat_id,
+        user_id,
+        normalized_link,
+        sent_at - window_seconds
+    ))
+    previous_count = cursor.fetchone()[0]
+
+    cursor.execute("""
+        INSERT INTO link_attempts (chat_id, user_id, normalized_link, sent_at)
+        VALUES (?, ?, ?, ?)
+    """, (chat_id, user_id, normalized_link, sent_at))
+
+    connection.commit()
+    connection.close()
+    return previous_count + 1
 
 
 # =================================

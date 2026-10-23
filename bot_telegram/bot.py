@@ -16,10 +16,16 @@ from database import (
     get_warning_history,
     get_warning_history_page,
     count_warning_history,
-    delete_warning_history
+    delete_warning_history,
+    add_allowed_domain,
+    remove_allowed_domain,
+    get_allowed_domains,
+    record_link_send
 )
 
 import re
+import time
+from urllib.parse import urlsplit
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions
 from telegram.ext import (
     Application,
@@ -111,7 +117,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Bot de gestion Telegram activé.\n\n"
         "Commandes disponibles :\n"
         "/start - Démarrer\n"
-        "/help - Afficher l'aide"
+        "/help - Afficher l'aide\n"
     )
 
 
@@ -134,6 +140,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/promote - promouvoir en admin un utilisateur \n"
         "/demote - enlever les droits admins \n"
         "/permissions - voir et gerer les permissions d'un admin \n"
+        "/allowdomain example.com - Autoriser un domaine (admin)\n"
+        "/removedomain example.com - Retirer un domaine (admin)\n"
+        "/listdomains - Afficher les domaines autorisés (admin)"
     )
 
 
@@ -1391,76 +1400,271 @@ async def is_user_admin(chat, user_id):
 #==========================
 
 
-async def detect_forbidden_links(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    """Supprime les messages contenant des liens envoyés par les non-admins."""
+def normalize_domain(value):
+    """Nettoie un nom de domaine donné par un administrateur."""
+    value = value.strip().lower()
+    if not value:
+        return None
 
-    message = update.effective_message
-    chat = update.effective_chat
-    user = update.effective_user
+    if "://" not in value:
+        value = "https://" + value
 
-    # Vérifier que le message vient d'un groupe.
-    if not message or not chat or not user:
-        return
-
-    if chat.type not in ("group", "supergroup"):
-        return
-
-    # Les administrateurs et le propriétaire sont exemptés.
     try:
-        member = await chat.get_member(user.id)
+        parsed = urlsplit(value)
+        domain = (parsed.hostname or "").lower().rstrip(".")
+    except ValueError:
+        return None
 
-        if member.status in ("administrator", "creator"):
-            return
+    if domain.startswith("www."):
+        domain = domain[4:]
 
-    except Exception as error:
-        print("Erreur de vérification du membre :", error)
-        return
+    if not domain or "." not in domain:
+        return None
 
-    # Examiner le texte ou la légende d'un média.
+    if not re.fullmatch(r"[a-z0-9.-]+", domain):
+        return None
+
+    if any(part == "" for part in domain.split(".")):
+        return None
+
+    return domain
+
+
+def extract_message_links(message):
+    """Extrait les URL visibles et les liens intégrés dans le texte."""
     text = message.text or message.caption or ""
+    found = []
 
     entities = (
         list(message.entities or ())
         + list(message.caption_entities or ())
     )
+    for entity in entities:
+        if entity.type == "text_link" and entity.url:
+            found.append(entity.url)
 
-    # Telegram peut signaler un lien visible ou un lien intégré.
-    has_link = any(
-        entity.type in ("url", "text_link")
-        for entity in entities
-    )
-
-    # Compléter la détection pour les URL écrites directement.
     url_pattern = (
         r"(?i)(?<![\w@])"
         r"(?:https?://|www\.|t\.me/|telegram\.me/)"
-        r"[^\s]+"
+        r"[^\s<>]+"
         r"|"
         r"(?<![\w@])"
         r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
         r"[a-z]{2,}"
-        r"(?:/[^\s]*)?"
+        r"(?:/[^\s<>]*)?"
     )
 
-    if not has_link and re.search(url_pattern, text):
-        has_link = True
+    found.extend(re.findall(url_pattern, text))
 
-    if not has_link:
+    cleaned = []
+    for link in found:
+        link = link.rstrip(".,!?;:)]}\"'")
+        if link and link not in cleaned:
+            cleaned.append(link)
+
+    return cleaned
+
+
+def parse_link(link):
+    """Renvoie le domaine et une forme stable de l'URL pour compter les répétitions."""
+    candidate = link.strip()
+    if not re.match(r"(?i)^https?://", candidate):
+        candidate = "https://" + candidate
+
+    try:
+        parsed = urlsplit(candidate)
+        domain = (parsed.hostname or "").lower().rstrip(".")
+        if domain.startswith("www."):
+            domain = domain[4:]
+
+        if not domain:
+            return None, None
+
+        path = parsed.path.rstrip("/")
+        normalized = domain + path
+        if parsed.query:
+            normalized += "?" + parsed.query
+
+        return domain, normalized.lower()
+    except ValueError:
+        return None, None
+
+
+def domain_is_allowed(domain, allowed_domains):
+    """Autorise le domaine exact et ses sous-domaines."""
+    return any(
+        domain == allowed or domain.endswith("." + allowed)
+        for allowed in allowed_domains
+    )
+
+
+async def allowdomain_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    chat = update.effective_chat
+
+    if not chat or chat.type not in ("group", "supergroup"):
+        await message.reply_text("Cette commande doit être utilisée dans un groupe.")
+        return
+    if not await is_admin(update):
+        await message.reply_text("❌ Réservé aux administrateurs.")
+        return
+    if len(context.args) != 1:
+        await message.reply_text("Utilisation : /allowdomain example.com")
         return
 
-    # Supprimer le message interdit.
+    domain = normalize_domain(context.args[0])
+    if not domain:
+        await message.reply_text("❌ Domaine invalide. Exemple : /allowdomain example.com")
+        return
+
+    if add_allowed_domain(chat.id, domain):
+        await message.reply_text(f"✅ Domaine autorisé : {domain}")
+    else:
+        await message.reply_text(f"ℹ️ {domain} est déjà dans la liste.")
+
+
+async def removedomain_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    chat = update.effective_chat
+
+    if not chat or chat.type not in ("group", "supergroup"):
+        await message.reply_text("Cette commande doit être utilisée dans un groupe.")
+        return
+    if not await is_admin(update):
+        await message.reply_text("❌ Réservé aux administrateurs.")
+        return
+    if len(context.args) != 1:
+        await message.reply_text("Utilisation : /removedomain example.com")
+        return
+
+    domain = normalize_domain(context.args[0])
+    if not domain:
+        await message.reply_text("❌ Domaine invalide. Exemple : /removedomain example.com")
+        return
+
+    if remove_allowed_domain(chat.id, domain):
+        await message.reply_text(f"✅ Domaine retiré : {domain}")
+    else:
+        await message.reply_text(f"ℹ️ {domain} n'était pas dans la liste.")
+
+
+async def listdomains_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    chat = update.effective_chat
+
+    if not chat or chat.type not in ("group", "supergroup"):
+        await message.reply_text("Cette commande doit être utilisée dans un groupe.")
+        return
+    if not await is_admin(update):
+        await message.reply_text("❌ Réservé aux administrateurs.")
+        return
+
+    domains = get_allowed_domains(chat.id)
+    if not domains:
+        await message.reply_text(
+            "📋 Aucun domaine autorisé pour le moment.\n"
+            "Les liens des domaines autorisés échappent à l'anti-spam. "
+            "Les autres liens sont supprimés au 3e envoi identique en 30 minutes."
+        )
+        return
+
+    await message.reply_text(
+        "📋 Domaines autorisés :\n" + "\n".join(f"• {domain}" for domain in domains)
+    )
+
+
+async def detect_forbidden_links(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    """Laisse passer les deux premiers envois puis supprime le troisième lien identique en 30 minutes."""
+
+    message = update.effective_message
+    chat = update.effective_chat
+    user = update.effective_user
+
+    if not message or not chat or not user:
+        return
+    if chat.type not in ("group", "supergroup"):
+        return
+
+    # Les administrateurs et le créateur sont exemptés.
+    try:
+        member = await context.bot.get_chat_member(chat.id, user.id)
+        if member.status in ("administrator", "creator"):
+            return
+    except Exception as error:
+        print("Erreur de vérification du membre :", error)
+        return
+
+    links = extract_message_links(message)
+    if not links:
+        return
+
+    # Les domaines autorisés échappent complètement à l'anti-spam.
+    # Seuls les liens dont le domaine n'est pas autorisé sont comptés.
+    allowed_domains = get_allowed_domains(chat.id)
+    parsed_links = []
+
+    for link in links:
+        domain, normalized_link = parse_link(link)
+        if not domain or not normalized_link:
+            continue
+        if domain_is_allowed(domain, allowed_domains):
+            continue
+        parsed_links.append(normalized_link)
+
+    if not parsed_links:
+        return
+
+    # Un lien identique est compté par utilisateur et par groupe sur 30 minutes.
+    now = int(time.time())
+    spam_detected = False
+
+    for normalized_link in set(parsed_links):
+        count = record_link_send(
+            chat.id,
+            user.id,
+            normalized_link,
+            now,
+            window_seconds=30 * 60
+        )
+        if count == 3:
+            spam_detected = True
+
+    if not spam_detected:
+        return
+
+    # Troisième envoi identique : supprimer puis ajouter un avertissement.
     try:
         await message.delete()
-        print(
-            f"Lien supprimé dans {chat.id}, "
-            f"message {message.message_id}, utilisateur {user.id}"
-        )
-
     except Exception as error:
-        print("Erreur de suppression d'un lien :", error)
+        print("Erreur de suppression du lien répété :", error)
+        return
+
+    save_user(chat.id, user)
+    add_warning(chat.id, user.id)
+    add_warning_history(
+        chat.id,
+        user.id,
+        "Spam : troisième envoi du même lien en 30 minutes",
+        context.bot.id
+    )
+
+    try:
+        await chat.send_message(
+            f"⚠️ {user.mention_html()}, ton message a été supprimé : "
+            "tu as envoyé le même lien 3 fois en 30 minutes. "
+            "Un avertissement a été ajouté à ton historique.",
+            parse_mode="HTML"
+        )
+    except Exception as error:
+        print("Erreur lors de l'envoi de l'avertissement automatique :", error)
+
+    print(
+        f"Avertissement anti-spam dans {chat.id}, "
+        f"utilisateur {user.id}, lien répété"
+    )
 
 
 #===========================
@@ -2300,6 +2504,9 @@ def main():
     app.add_handler(CommandHandler("promote", promote))
     app.add_handler(CommandHandler("demote", demote))
     app.add_handler(CommandHandler("permissions", permissions))
+    app.add_handler(CommandHandler("allowdomain", allowdomain_command))
+    app.add_handler(CommandHandler("removedomain", removedomain_command))
+    app.add_handler(CommandHandler("listdomains", listdomains_command))
 
     # Fiches utilisateurs
     app.add_handler(
