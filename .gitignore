@@ -1,3 +1,6 @@
 bot_telegram/.env
+bot_telegram/backups/
+bot_telegram/backup.log
+bot_telegram/bot.db
 bot_telegram/__pycache__/
 clab/output/
