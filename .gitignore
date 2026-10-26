@@ -5,3 +5,4 @@ bot_telegram/backup.log
 bot_telegram/bot.db
 bot_telegram/__pycache__/
 clab/output/
+bot_telegram/backup_check.log
