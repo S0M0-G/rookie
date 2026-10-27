@@ -23,6 +23,13 @@ from database import (
     record_link_send
 )
 
+from handlers.common import (
+    build_user_keyboard,
+    user_card_text,
+    is_admin,
+    get_target_user,
+)
+from handlers.ban import register_ban_handlers
 from handlers.general import register_general_handlers
 import re
 import time
@@ -41,73 +48,6 @@ load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
 
-
-# =========================
-# OUTILS
-# =========================
-
-def build_user_keyboard(user_id, banned):
-    """Construit les boutons d'une fiche utilisateur."""
-
-    moderation_button = (
-        InlineKeyboardButton(
-            "🔓 Débannir",
-            callback_data=f"confirm_unban:{user_id}"
-        )
-        if banned
-        else
-        InlineKeyboardButton(
-            "🔨 Bannir",
-            callback_data=f"confirm_ban:{user_id}"
-        )
-    )
-
-    return [
-        [moderation_button],
-        [
-            InlineKeyboardButton(
-                "⚠️ Avertir",
-                callback_data=f"confirm_warning:{user_id}"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "🔄 Réinitialiser",
-                callback_data=f"confirm_reset_warning:{user_id}"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "📋 Historique",
-                callback_data=f"history:{user_id}"
-            )
-        ]
-    ]
-
-
-def user_card_text(user):
-    """Construit le texte d'une fiche utilisateur."""
-    user_id, username, first_name, last_name, banned, warnings = user
-
-    return (
-        f"👤 {first_name or 'Sans prénom'}\n\n"
-        f"ID : {user_id}\n"
-        f"Username : @{username if username else 'aucun'}\n"
-        f"Prénom : {first_name or 'aucun'}\n"
-        f"Nom : {last_name or 'aucun'}\n"
-        f"Statut : {'🚫 Banni' if banned else '✅ Actif'}\n"
-        f"Avertissements : {warnings}"
-    )
-
-
-async def is_admin(update: Update):
-    """Vérifie si l'utilisateur qui déclenche l'action est administrateur."""
-    member = await update.effective_chat.get_member(
-        update.effective_user.id
-    )
-
-    return member.status in ("administrator", "creator")
-
 # =========================
 # NOUVEAUX MEMBRES
 # =========================
@@ -118,117 +58,6 @@ async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             f"Bienvenue {member.first_name} !"
-        )
-
-
-# =========================
-# BAN / UNBAN PAR COMMANDE
-# =========================
-
-async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.effective_message
-
-    if not await is_admin(update):
-        await message.reply_text(
-            "❌ Tu dois être administrateur pour utiliser cette commande."
-        )
-        return
-
-    # Accepte une réponse classique ou une réponse externe
-    user = get_target_user(message)
-
-    if not user:
-        await message.reply_text(
-            "❌ Réponds au message de l'utilisateur que tu veux bannir."
-        )
-        return
-
-    save_user(update.effective_chat.id, user)
-
-    try:
-        await update.effective_chat.ban_member(user.id)
-        set_banned(update.effective_chat.id, user.id, True)
-
-        await message.reply_text(
-            f"🚫 {user.first_name} a été banni."
-        )
-
-    except Exception as error:
-        print("Erreur lors du bannissement :", error)
-
-        await message.reply_text(
-            "❌ Impossible de bannir cet utilisateur."
-        )
-
-async def unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.effective_message
-
-    if not await is_admin(update):
-        await message.reply_text(
-            "❌ Tu dois être administrateur pour utiliser cette commande."
-        )
-        return
-
-    # Sans argument, on utilise l'utilisateur du message auquel on répond.
-    if not context.args:
-        target_user = get_target_user(message)
-
-        if not target_user:
-            await message.reply_text(
-                "❌ Réponds au message de l'utilisateur que tu veux unban, "
-                "ou utilise /unban ID ou /unban @username."
-            )
-            return
-
-        save_user(update.effective_chat.id, target_user)
-        user = get_user(update.effective_chat.id, target_user.id)
-
-    else:
-        target = context.args[0]
-
-        # Recherche par username
-        if target.startswith("@"):
-            username = target[1:]
-            user = get_user_by_username(update.effective_chat.id, username)
-
-        # Recherche par ID
-        else:
-            try:
-                user_id = int(target)
-            except ValueError:
-                await message.reply_text(
-                    "❌ Utilise un ID ou un username valide."
-                )
-                return
-
-            user = get_user(update.effective_chat.id, user_id)
-
-    if not user:
-        await message.reply_text(
-            "❌ Cet utilisateur n'est pas dans la base."
-        )
-        return
-
-    user_id = user[0]
-
-    try:
-        await update.effective_chat.unban_member(user_id)
-        set_banned(update.effective_chat.id, user_id, False)
-
-        user = get_user(update.effective_chat.id, user_id)
-
-        await message.reply_text(
-            user_card_text(user),
-            reply_markup=InlineKeyboardMarkup(
-                build_user_keyboard(user_id, False)
-            )
-        )
-
-    except Exception as error:
-        print("Erreur lors du unban :", error)
-
-        await message.reply_text(
-            "❌ Impossible de débannir cet utilisateur."
         )
 
 # =========================
@@ -496,199 +325,6 @@ async def user_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Banni : {'Oui' if user[4] else 'Non'}\n"
         f"Avertissements : {user[5]}"
     )
-
-
-# =========================
-# BOUTONS BAN
-# =========================
-
-async def confirm_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-
-    await query.answer()
-
-    user_id = int(query.data.split(":")[1])
-
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                "🔨 Oui, bannir",
-                callback_data=f"ban:{user_id}"
-            ),
-            InlineKeyboardButton(
-                "❌ Annuler",
-                callback_data=f"cancel_ban:{user_id}"
-            )
-        ]
-    ]
-
-    await query.edit_message_text(
-        f"⚠️ Confirmer le bannissement de l'utilisateur {user_id} ?",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-
-async def cancel_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-
-    await query.answer()
-
-    user_id = int(query.data.split(":")[1])
-
-    user = get_user(update.effective_chat.id, user_id)
-
-    if not user:
-        await query.edit_message_text(
-            "❌ Utilisateur introuvable."
-        )
-        return
-
-    _, username, first_name, last_name, banned, warnings = user
-
-    await query.edit_message_text(
-        user_card_text(user),
-        reply_markup=InlineKeyboardMarkup(
-            build_user_keyboard(user_id, banned)
-        )
-    )
-
-
-async def ban_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-
-    await query.answer()
-
-    if not await is_admin(update):
-        await query.answer(
-            "❌ Réservé aux administrateurs.",
-            show_alert=True
-        )
-        return
-
-    user_id = int(query.data.split(":")[1])
-
-    try:
-        await update.effective_chat.ban_member(user_id)
-        set_banned(update.effective_chat.id, user_id, True)
-
-        user = get_user(update.effective_chat.id, user_id)
-
-        if not user:
-            await query.edit_message_text(
-                f"🚫 Utilisateur {user_id} banni."
-            )
-            return
-
-        await query.edit_message_text(
-            user_card_text(user),
-            reply_markup=InlineKeyboardMarkup(
-                build_user_keyboard(user_id, True)
-            )
-        )
-
-    except Exception as error:
-        print("Erreur lors du bannissement :", error)
-
-        await query.edit_message_text(
-            "❌ Impossible de bannir cet utilisateur."
-        )
-
-
-# =========================
-# BOUTONS UNBAN
-# =========================
-
-async def confirm_unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-
-    await query.answer()
-
-    user_id = int(query.data.split(":")[1])
-
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                "🔓 Oui, débannir",
-                callback_data=f"unban:{user_id}"
-            ),
-            InlineKeyboardButton(
-                "❌ Annuler",
-                callback_data=f"cancel_unban:{user_id}"
-            )
-        ]
-    ]
-
-    await query.edit_message_text(
-        f"⚠️ Confirmer le débannissement de l'utilisateur {user_id} ?",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-
-async def cancel_unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-
-    await query.answer()
-
-    user_id = int(query.data.split(":")[1])
-
-    user = get_user(update.effective_chat.id, user_id)
-
-    if not user:
-        await query.edit_message_text(
-            "❌ Utilisateur introuvable."
-        )
-        return
-
-    _, username, first_name, last_name, banned, warnings = user
-
-    await query.edit_message_text(
-        user_card_text(user),
-        reply_markup=InlineKeyboardMarkup(
-            build_user_keyboard(user_id, banned)
-        )
-    )
-
-
-async def unban_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-
-    await query.answer()
-
-    if not await is_admin(update):
-        await query.answer(
-            "❌ Réservé aux administrateurs.",
-            show_alert=True
-        )
-        return
-
-    user_id = int(query.data.split(":")[1])
-
-    try:
-        await update.effective_chat.unban_member(user_id)
-        set_banned(update.effective_chat.id, user_id, False)
-
-        user = get_user(update.effective_chat.id, user_id)
-
-        if not user:
-            await query.edit_message_text(
-                f"🔓 Utilisateur {user_id} débanni."
-            )
-            return
-
-        await query.edit_message_text(
-            user_card_text(user),
-            reply_markup=InlineKeyboardMarkup(
-                build_user_keyboard(user_id, False)
-            )
-        )
-
-    except Exception as error:
-        print("Erreur lors du débannissement :", error)
-
-        await query.edit_message_text(
-            "❌ Impossible de débannir cet utilisateur."
-        )
-
 
 # =========================
 # AVERTISSEMENTS
@@ -1633,21 +1269,6 @@ async def detect_forbidden_links(
 # FONCTION MUTE/UNMUTE/kick
 #===========================
 
-def get_target_user(message):
-    """Récupère l'utilisateur ciblé par une réponse classique ou externe."""
-
-    # Réponse classique à un message du groupe
-    if message.reply_to_message and message.reply_to_message.from_user:
-        return message.reply_to_message.from_user
-
-    # Réponse externe (notamment certains messages liés au canal)
-    if message.external_reply and message.external_reply.origin:
-        return message.external_reply.origin.sender_user
-
-    return None
-
-
-
 async def mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
 
@@ -2443,8 +2064,7 @@ def main():
 
     # Commandes
     register_general_handlers(app)
-    app.add_handler(CommandHandler("ban", ban))
-    app.add_handler(CommandHandler("unban", unban))
+    register_ban_handlers(app)
     app.add_handler(CommandHandler("warning", warning_command))
     app.add_handler(CommandHandler("unwarning", unwarning))
     app.add_handler(CommandHandler("users", users_list))
@@ -2475,46 +2095,6 @@ def main():
         CallbackQueryHandler(
             users_buttons,
             pattern="^users:"
-        )
-    )
-
-    # Bannissement
-    app.add_handler(
-        CallbackQueryHandler(
-            confirm_ban,
-            pattern="^confirm_ban:"
-        )
-    )
-    app.add_handler(
-        CallbackQueryHandler(
-            cancel_ban,
-            pattern="^cancel_ban:"
-        )
-    )
-    app.add_handler(
-        CallbackQueryHandler(
-            ban_button,
-            pattern="^ban:"
-        )
-    )
-
-    # Débannissement
-    app.add_handler(
-        CallbackQueryHandler(
-            confirm_unban,
-            pattern="^confirm_unban:"
-        )
-    )
-    app.add_handler(
-        CallbackQueryHandler(
-            cancel_unban,
-            pattern="^cancel_unban:"
-        )
-    )
-    app.add_handler(
-        CallbackQueryHandler(
-            unban_button,
-            pattern="^unban:"
         )
     )
 
