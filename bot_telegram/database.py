@@ -245,6 +245,15 @@ def create_tables():
         )
     """)
 
+        # Ajouter message_id aux anciennes bases si nécessaire
+    cursor.execute("PRAGMA table_info(link_attempts)")
+    columns = [column[1] for column in cursor.fetchall()]
+
+    if "message_id" not in columns:
+        cursor.execute(
+            "ALTER TABLE link_attempts ADD COLUMN message_id INTEGER"
+        )
+
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_link_attempts_lookup
         ON link_attempts (chat_id, user_id, normalized_link, sent_at)
@@ -722,8 +731,15 @@ def get_allowed_domains(chat_id):
     return domains
 
 
-def record_link_send(chat_id, user_id, normalized_link, sent_at, window_seconds=1800):
-    """Enregistre un lien et renvoie son nombre d'envois dans la fenêtre de 30 minutes."""
+def record_link_send(
+    chat_id,
+    user_id,
+    normalized_link,
+    sent_at,
+    message_id,
+    window_seconds=1800
+):
+    """Enregistre un lien et renvoie son nombre d'envois et les IDs des messages."""
     connection = connect()
     cursor = connection.cursor()
 
@@ -731,6 +747,26 @@ def record_link_send(chat_id, user_id, normalized_link, sent_at, window_seconds=
         "DELETE FROM link_attempts WHERE sent_at < ?",
         (sent_at - window_seconds,)
     )
+
+    cursor.execute("""
+        SELECT message_id
+        FROM link_attempts
+        WHERE chat_id = ?
+          AND user_id = ?
+          AND normalized_link = ?
+          AND sent_at >= ?
+        ORDER BY sent_at ASC
+    """, (
+        chat_id,
+        user_id,
+        normalized_link,
+        sent_at - window_seconds
+    ))
+
+    previous_messages = [
+        row[0] for row in cursor.fetchall()
+        if row[0] is not None
+    ]
 
     cursor.execute("""
         SELECT COUNT(*)
@@ -745,16 +781,28 @@ def record_link_send(chat_id, user_id, normalized_link, sent_at, window_seconds=
         normalized_link,
         sent_at - window_seconds
     ))
+
     previous_count = cursor.fetchone()[0]
 
     cursor.execute("""
-        INSERT INTO link_attempts (chat_id, user_id, normalized_link, sent_at)
-        VALUES (?, ?, ?, ?)
-    """, (chat_id, user_id, normalized_link, sent_at))
+        INSERT INTO link_attempts (
+            chat_id, user_id, normalized_link, sent_at, message_id
+        )
+        VALUES (?, ?, ?, ?, ?)
+    """, (
+        chat_id,
+        user_id,
+        normalized_link,
+        sent_at,
+        message_id
+    ))
 
     connection.commit()
     connection.close()
-    return previous_count + 1
+
+    message_ids = previous_messages + [message_id]
+
+    return previous_count + 1, message_ids
 
 
 # =================================
