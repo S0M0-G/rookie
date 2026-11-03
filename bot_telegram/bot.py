@@ -12,37 +12,12 @@ from handlers.history import register_history_handlers
 from handlers.admin import register_admin_handlers
 from handlers.permissions import register_permissions_handlers
 from handlers.welcome import register_welcome_handlers
-from telegram.ext import (
-    Application,
-    ContextTypes,
-)
+from handlers.errors import register_error_handlers
+from telegram.ext import Application
 
 load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
-
-# =========================
-# NOUVEAUX MEMBRES
-# =========================
-
-# =========================
-# LISTE DES UTILISATEURS
-# =========================
-
-# fonction permission
-
-# =========================
-# GESTION DES ERREURS
-# =========================
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    if "Message is not modified" in str(context.error):
-        return
-
-    print("========== ERREUR ==========")
-    print(context.error)
-    print("============================")
-
 
 # =========================
 # MAIN
@@ -69,10 +44,11 @@ def main():
     register_admin_handlers(app)
     register_permissions_handlers(app)
     register_welcome_handlers(app)
+    register_error_handlers(app)
 
-    # Gestion globale des erreurs
-    app.add_error_handler(error_handler)
-
+#++++++++++++++++++++++++++++
+#          (@_@)
+#++++++++++++++++++++++++++++
     print("Bot démarré...")
     app.run_polling()
 
