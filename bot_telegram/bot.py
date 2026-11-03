@@ -1,16 +1,7 @@
 import os
 from dotenv import load_dotenv
 
-from database import (
-    create_tables,
-    save_user,
-)
-
-from handlers.common import (
-    is_admin,
-    get_target_user,
-)
-
+from database import create_tables
 from handlers.ban import register_ban_handlers
 from handlers.warnings import register_warnings_handlers
 from handlers.general import register_general_handlers
@@ -20,13 +11,10 @@ from handlers.users import register_users_handlers
 from handlers.history import register_history_handlers
 from handlers.admin import register_admin_handlers
 from handlers.permissions import register_permissions_handlers
-from telegram import Update
-
+from handlers.welcome import register_welcome_handlers
 from telegram.ext import (
     Application,
-    MessageHandler,
     ContextTypes,
-    filters,
 )
 
 load_dotenv()
@@ -36,14 +24,6 @@ TOKEN = os.getenv("BOT_TOKEN")
 # =========================
 # NOUVEAUX MEMBRES
 # =========================
-
-async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for member in update.message.new_chat_members:
-        save_user(update.effective_chat.id, member)
-
-        await update.message.reply_text(
-            f"Bienvenue {member.first_name} !"
-        )
 
 # =========================
 # LISTE DES UTILISATEURS
@@ -88,14 +68,7 @@ def main():
     register_history_handlers(app)
     register_admin_handlers(app)
     register_permissions_handlers(app)
-
-    # Nouveaux membres
-    app.add_handler(
-        MessageHandler(
-            filters.StatusUpdate.NEW_CHAT_MEMBERS,
-            welcome
-        )
-    )
+    register_welcome_handlers(app)
 
     # Gestion globale des erreurs
     app.add_error_handler(error_handler)
