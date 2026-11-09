@@ -61,6 +61,10 @@ async def is_admin(update: Update):
     )
     return member.status in ("administrator", "creator")
 
+async def is_user_admin(chat, user_id):
+    """Vérifie si un utilisateur ciblé est administrateur."""
+    member = await chat.get_member(user_id)
+    return member.status in ("administrator", "creator")
 
 def get_target_user(message):
     """Récupère l'utilisateur ciblé par une réponse classique ou externe."""

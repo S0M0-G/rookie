@@ -1,16 +1,11 @@
 from telegram import Update, ChatPermissions
 from telegram.ext import CommandHandler, ContextTypes
 
-from handlers.common import is_admin, get_target_user
-
-
-async def is_user_admin(chat, user_id):
-    member = await chat.get_member(user_id)
-
-    return member.status in (
-        "administrator",
-        "creator"
-    )
+from handlers.common import (
+    is_admin,
+    get_target_user,
+    is_user_admin,
+)
 
 
 async def mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
