@@ -21,7 +21,7 @@ from database import (
     add_warning_history,
 )
 
-from handlers.common import is_admin
+from handlers.common import is_admin, is_user_admin
 
 
 def normalize_domain(value):
@@ -228,9 +228,7 @@ async def detect_forbidden_links(
 
     # Les administrateurs et le créateur sont exemptés.
     try:
-        member = await context.bot.get_chat_member(chat.id, user.id)
-
-        if member.status in ("administrator", "creator"):
+        if await is_user_admin(chat, user.id):
             return
 
     except Exception as error:
