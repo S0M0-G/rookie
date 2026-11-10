@@ -44,17 +44,7 @@ async def users_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         page
     )
 
-
-async def edit_users_page(query, chat_id, page):
-    per_page = 10
-    total = count_users(chat_id)
-    total_pages = max(1, (total + per_page - 1) // per_page)
-
-    if page < 1 or page > total_pages:
-        return
-
-    users = get_users_page(chat_id, page, per_page)
-
+def build_users_page_content(users, page, total_pages, per_page):
     text = f"👥 Utilisateurs — Page {page}/{total_pages}\n\n"
 
     for number, user in enumerate(
@@ -118,9 +108,25 @@ async def edit_users_page(query, chat_id, page):
     if navigation:
         user_buttons.append(navigation)
 
+    return text, InlineKeyboardMarkup(user_buttons)
+
+async def edit_users_page(query, chat_id, page):
+    per_page = 10
+    total = count_users(chat_id)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+
+    if page < 1 or page > total_pages:
+        return
+
+    users = get_users_page(chat_id, page, per_page)
+
+    text, keyboard = build_users_page_content(
+        users, page, total_pages, per_page
+    )
+
     await query.edit_message_text(
         text,
-        reply_markup=InlineKeyboardMarkup(user_buttons)
+        reply_markup=keyboard
     )
 
 
@@ -137,74 +143,14 @@ async def show_users_page(message, chat_id, page):
 
     users = get_users_page(chat_id, page, per_page)
 
-    text = f"👥 Utilisateurs — Page {page}/{total_pages}\n\n"
-
-    for number, user in enumerate(
-        users,
-        start=(page - 1) * per_page + 1
-    ):
-        user_id, username, first_name, last_name, banned, warnings = user
-
-        name = first_name or "Sans prénom"
-
-        if last_name:
-            name += f" {last_name}"
-
-        if username:
-            name += f" (@{username})"
-
-        status = "🚫 Banni" if banned else "✅ Actif"
-
-        text += (
-            f"{number}. {name}\n"
-            f"   ID : {user_id}\n"
-            f"   Statut : {status}\n"
-            f"   Avertissements : {warnings}\n\n"
-        )
-
-    user_buttons = []
-
-    for user in users:
-        user_id, username, first_name, last_name, banned, warnings = user
-
-        name = first_name or "Sans prénom"
-
-        if last_name:
-            name += f" {last_name}"
-
-        user_buttons.append([
-            InlineKeyboardButton(
-                f"👤 {name}",
-                callback_data=f"user:{user_id}"
-            )
-        ])
-
-    navigation = []
-
-    if page > 1:
-        navigation.append(
-            InlineKeyboardButton(
-                "⬅️",
-                callback_data=f"users:{page - 1}"
-            )
-        )
-
-    if page < total_pages:
-        navigation.append(
-            InlineKeyboardButton(
-                "➡️",
-                callback_data=f"users:{page + 1}"
-            )
-        )
-
-    if navigation:
-        user_buttons.append(navigation)
+    text, keyboard = build_users_page_content(
+        users, page, total_pages, per_page
+    )
 
     await message.reply_text(
         text,
-        reply_markup=InlineKeyboardMarkup(user_buttons)
+        reply_markup=keyboard
     )
-
 
 async def user_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
