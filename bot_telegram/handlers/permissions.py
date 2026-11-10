@@ -1,7 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CommandHandler, CallbackQueryHandler, ContextTypes
 
-from handlers.common import is_admin
+from handlers.common import is_admin, get_target_user
 
 
 async def permissions(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -26,7 +26,7 @@ async def permissions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    target = message.reply_to_message.from_user
+    target = get_target_user(message)
 
     if not target:
         await message.reply_text(

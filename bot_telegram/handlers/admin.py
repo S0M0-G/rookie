@@ -3,7 +3,7 @@ from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
 
 from database import get_all_users
-from handlers.common import is_admin
+from handlers.common import is_admin, get_target_user
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -118,7 +118,7 @@ async def promote(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    target = message.reply_to_message.from_user
+    target = get_target_user(message)
 
     if not target:
         await message.reply_text(
@@ -172,7 +172,7 @@ async def demote(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    target = message.reply_to_message.from_user
+    target = get_target_user(message)
 
     if not target:
         await message.reply_text(
