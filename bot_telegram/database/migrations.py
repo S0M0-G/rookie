@@ -6,149 +6,111 @@ def migrate_database():
     connection = connect()
     cursor = connection.cursor()
 
-    # Vérifier si la table users existe
-    cursor.execute("""
-        SELECT name
-        FROM sqlite_master
-        WHERE type = 'table'
-        AND name = 'users'
-    """)
-
-    users_exists = cursor.fetchone()
-
-    if not users_exists:
-        connection.close()
-        return
-
-    # Vérifier si chat_id existe déjà
-    cursor.execute("PRAGMA table_info(users)")
-    columns = [column[1] for column in cursor.fetchall()]
-
-    if "chat_id" in columns:
-        connection.close()
-        return
-
-    print("Migration de la base de données en cours...")
-
-    # Sauvegarde de sécurité
-    backup_path = DATABASE + ".backup"
-
-    if not os.path.exists(backup_path):
-        shutil.copy2(DATABASE, backup_path)
-        print("Sauvegarde créée :", backup_path)
-
     try:
-        # ---------------------------------
-        # ANCIENNE TABLE USERS
-        # ---------------------------------
-
-        cursor.execute("""
-            ALTER TABLE users
-            RENAME TO users_old
-        """)
-
-        cursor.execute("""
-            CREATE TABLE users (
-                chat_id INTEGER NOT NULL,
-                id INTEGER NOT NULL,
-                username TEXT,
-                first_name TEXT,
-                last_name TEXT,
-                is_banned INTEGER DEFAULT 0,
-                warnings INTEGER DEFAULT 0,
-                PRIMARY KEY (chat_id, id)
-            )
-        """)
-
-        # Anciennes données :
-        # chat_id = 0 signifie données historiques
-        cursor.execute("""
-            INSERT INTO users (
-                chat_id,
-                id,
-                username,
-                first_name,
-                last_name,
-                is_banned,
-                warnings
-            )
-            SELECT
-                0,
-                id,
-                username,
-                first_name,
-                last_name,
-                is_banned,
-                warnings
-            FROM users_old
-        """)
-
-        cursor.execute("DROP TABLE users_old")
-
-        # ---------------------------------
-        # ANCIENNE TABLE WARNINGS_HISTORY
-        # ---------------------------------
-
+        # Vérifier les tables existantes
         cursor.execute("""
             SELECT name
             FROM sqlite_master
             WHERE type = 'table'
-            AND name = 'warnings_history'
         """)
 
-        history_exists = cursor.fetchone()
+        tables = {row[0] for row in cursor.fetchall()}
 
-        if history_exists:
+        # Déterminer indépendamment les migrations nécessaires
+        migrate_users = False
+        migrate_history = False
 
+        if "users" in tables:
+            cursor.execute("PRAGMA table_info(users)")
+            columns = {column[1] for column in cursor.fetchall()}
+            migrate_users = "chat_id" not in columns
+
+        if "warnings_history" in tables:
             cursor.execute("PRAGMA table_info(warnings_history)")
-            history_columns = [
-                column[1]
-                for column in cursor.fetchall()
-            ]
+            columns = {
+                column[1] for column in cursor.fetchall()
+            }
+            migrate_history = "chat_id" not in columns
 
-            if "chat_id" not in history_columns:
+        if not migrate_users and not migrate_history:
+            return
 
-                cursor.execute("""
-                    ALTER TABLE warnings_history
-                    RENAME TO warnings_history_old
-                """)
+        # Sauvegarde avant migration
+        backup_path = DATABASE + ".backup"
 
-                cursor.execute("""
-                    CREATE TABLE warnings_history (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        chat_id INTEGER NOT NULL,
-                        user_id INTEGER NOT NULL,
-                        reason TEXT,
-                        admin_id INTEGER,
-                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
+        if not os.path.exists(backup_path):
+            shutil.copy2(DATABASE, backup_path)
+            print("Sauvegarde créée :", backup_path)
 
-                cursor.execute("""
-                    INSERT INTO warnings_history (
-                        id,
-                        chat_id,
-                        user_id,
-                        reason,
-                        admin_id,
-                        created_at
-                    )
-                    SELECT
-                        id,
-                        0,
-                        user_id,
-                        reason,
-                        admin_id,
-                        created_at
-                    FROM warnings_history_old
-                """)
+        print("Migration de la base de données en cours...")
 
-                cursor.execute(
-                    "DROP TABLE warnings_history_old"
+        # Une transaction pour toutes les migrations
+        cursor.execute("BEGIN")
+
+        if migrate_users:
+            cursor.execute("""
+                ALTER TABLE users RENAME TO users_old
+            """)
+
+            cursor.execute("""
+                CREATE TABLE users (
+                    chat_id INTEGER NOT NULL,
+                    id INTEGER NOT NULL,
+                    username TEXT,
+                    first_name TEXT,
+                    last_name TEXT,
+                    is_banned INTEGER DEFAULT 0,
+                    warnings INTEGER DEFAULT 0,
+                    PRIMARY KEY (chat_id, id)
                 )
+            """)
+
+            cursor.execute("""
+                INSERT INTO users (
+                    chat_id, id, username, first_name,
+                    last_name, is_banned, warnings
+                )
+                SELECT
+                    0, id, username, first_name,
+                    last_name, is_banned, warnings
+                FROM users_old
+            """)
+
+            cursor.execute("DROP TABLE users_old")
+
+        if migrate_history:
+            cursor.execute("""
+                ALTER TABLE warnings_history
+                RENAME TO warnings_history_old
+            """)
+
+            cursor.execute("""
+                CREATE TABLE warnings_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    reason TEXT,
+                    admin_id INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                INSERT INTO warnings_history (
+                    id, chat_id, user_id,
+                    reason, admin_id, created_at
+                )
+                SELECT
+                    id, 0, user_id,
+                    reason, admin_id, created_at
+                FROM warnings_history_old
+            """)
+
+            cursor.execute(
+                "DROP TABLE warnings_history_old"
+            )
 
         connection.commit()
-
         print("Migration terminée avec succès.")
 
     except Exception as error:
