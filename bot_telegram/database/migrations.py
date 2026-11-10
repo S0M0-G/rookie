@@ -122,6 +122,68 @@ def migrate_database():
         connection.close()
 
 
+def create_management_tables(cursor):
+
+    # ---------------------------------
+    # RESPONSABLES
+    # ---------------------------------
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS owners (
+            telegram_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            status TEXT NOT NULL DEFAULT 'active'
+                CHECK(status IN ('active', 'blocked')),
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # ---------------------------------
+    # GROUPES ET CANAUX
+    # ---------------------------------
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS resources (
+            chat_id INTEGER PRIMARY KEY,
+            owner_id INTEGER NOT NULL,
+            chat_type TEXT NOT NULL
+                CHECK(chat_type IN ('group', 'supergroup', 'channel')),
+            title TEXT,
+            username TEXT,
+            status TEXT NOT NULL DEFAULT 'active'
+                CHECK(status IN ('active', 'inactive')),
+            added_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+
+            FOREIGN KEY (owner_id)
+                REFERENCES owners(telegram_id)
+                ON DELETE CASCADE
+        )
+    """)
+
+    # ---------------------------------
+    # RESTRICTIONS DES RESPONSABLES
+    # ---------------------------------
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS owner_restrictions (
+            owner_id INTEGER NOT NULL,
+            feature TEXT NOT NULL,
+            is_restricted INTEGER NOT NULL DEFAULT 1,
+            reason TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+
+            PRIMARY KEY (owner_id, feature),
+
+            FOREIGN KEY (owner_id)
+                REFERENCES owners(telegram_id)
+                ON DELETE CASCADE
+        )
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_resources_owner
+        ON resources(owner_id)
+    """)
+
 # =================================
 # CRÉATION DE LA BASE DE DONNÉES
 # =================================
@@ -204,10 +266,6 @@ def create_tables():
         ON link_attempts (chat_id, user_id, normalized_link, sent_at)
     """)
 
+    create_management_tables(cursor)
     connection.commit()
     connection.close()
-
-
-# =================================
-# ENREGISTREMENT DES UTILISATEURS
-# =================================

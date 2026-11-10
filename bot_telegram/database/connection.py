@@ -7,4 +7,6 @@ DATABASE = os.path.join(BASE_DIR, "bot.db")
 
 
 def connect():
-    return sqlite3.connect(DATABASE)
+    connection = sqlite3.connect(DATABASE)
+    connection.execute("PRAGMA foreign_keys = ON")
+    return connection

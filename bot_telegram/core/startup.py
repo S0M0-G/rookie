@@ -11,13 +11,18 @@ from handlers.admin import register_admin_handlers
 from handlers.permissions import register_permissions_handlers
 from handlers.welcome import register_welcome_handlers
 from handlers.errors import register_error_handlers
-
+from handlers.resources import register_resource_handlers
+from handlers.owners import register_owners_handlers
+from handlers.stop import register_stop_handlers
+from handlers.access import register_access_handlers
 
 def initialize_database():
     create_tables()
 
 
 def register_handlers(app):
+    register_access_handlers(app)
+
     register_general_handlers(app)
     register_ban_handlers(app)
     register_warnings_handlers(app)
@@ -26,6 +31,9 @@ def register_handlers(app):
     register_users_handlers(app)
     register_history_handlers(app)
     register_admin_handlers(app)
+    register_owners_handlers(app)
+    register_stop_handlers(app)
     register_permissions_handlers(app)
     register_welcome_handlers(app)
+    register_resource_handlers(app)
     register_error_handlers(app)
